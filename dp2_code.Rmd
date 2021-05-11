@@ -1,0 +1,185 @@
+---
+title: "DP2"
+output:
+  pdf_document: default
+  html_notebook: default
+---
+```{r}
+library(tidyverse)
+library(reshape2)
+library(dplyr)
+library(lubridate)
+library(readr)
+library(rvest)
+library(magrittr)
+library(knitr)
+library(SnowballC)
+library(tm)
+library(wordcloud)
+library(naniar)
+library(ggplot2)
+```
+
+
+```{r}
+setwd("C:/Users/User/OneDrive/Desktop/Spring 2021/OIDD 245/DP2")
+teleport_data<- read_csv("oidd_hw4 - teleport.csv")
+numbeo_data <- read_csv("oidd_hw4 - numbeo_data.csv")
+tom_tom_data <- read_csv("oidd_hw4 - tom_tom.csv")
+culture_data <- read_csv("oidd_dp2 - culture_forum_new.csv")
+```
+```{r}
+wiki = read_html("https://en.wikipedia.org/wiki/City") %>% html_nodes("p")%>% html_text()
+corp.original = VCorpus(VectorSource(wiki))
+
+corp = tm_map(corp.original, removePunctuation)
+corp = tm_map(corp, removeNumbers)
+corp = tm_map(corp, content_transformer(tolower), lazy=TRUE)
+corp = tm_map(corp, content_transformer(removeWords), c("city"), lazy=TRUE)
+corp = tm_map(corp, content_transformer(removeWords), c("urban"), lazy=TRUE)
+corp = tm_map(corp, content_transformer(removeWords), c("world"), lazy=TRUE)
+corp = tm_map(corp, content_transformer(removeWords), c("cities"), lazy=TRUE)
+corp = tm_map(corp, content_transformer(removeWords), c("private"), lazy=TRUE)
+corp = tm_map(corp, content_transformer(removeWords), c("population"), lazy=TRUE)
+corp = tm_map(corp, content_transformer(removeWords), c("including"), lazy=TRUE)
+corp = tm_map(corp, content_transformer(removeWords), stopwords("english"), lazy=TRUE)
+#corp = tm_map(corp, content_transformer(stemDocument), lazy=TRUE)
+corp = tm_map(corp, stripWhitespace)
+wordcloud(corp)
+```
+```{r}
+culture_data = culture_data %>% replace_with_na_all(condition = ~.x == "#N/A")
+numbeo_data = numbeo_data %>% replace_with_na_all(condition = ~.x == "#N/A")
+
+```
+```{r}
+total <- merge(culture_data,teleport_data, by="City")
+total <- merge(total,tom_tom_data, by="City")
+total <- merge(total,numbeo_data, by="City")
+total$City[total$City == 'Sao Paulo'] <- 'Sao_Paulo'
+total$City[total$City == 'Tel Aviv-Yafo'] <- 'Tel_Aviv_Yafo'
+total$City[total$City == 'San Francisco'] <- 'San_Francisco'
+total$City[total$City == 'Buenos Aires'] <- 'Buenos_Aires'
+total$City[total$City == 'Cape Town'] <- 'Cape_Town'
+
+```
+```{r}
+#make pie chart of continent distribution
+
+cont = total["Continent"]
+cont = cont %>% group_by(Continent) %>%summarise(number = n())
+pct <- round(100*cont$number/sum(cont$number))
+
+pie(cont$number,
+    labels = paste(cont$Continent, sep = " ", ":", pct, "%"), 
+    col = rainbow(length(cont$Continent)), 
+    main = "Distribution of Cities by Continent")
+```
+```{r}
+#time series of change in cost of living in cities
+time_series <- total[c("City", "Cost of Living_2017","Cost of Living Index_2018", "Cost of Living Index_2019")]
+time_series <- na.omit(time_series) 
+
+#pick 10 random cities from list
+set.seed(23)
+rand_ten = sample_n(time_series,10)
+colnames(rand_ten) = c("City","2017", "2018", "2019")
+ten_melted = melt(rand_ten,id="City", 
+                  variable.name = "Year", 
+                  value.name = "Cost_of_Living_Index")
+ten_melted$Year <- as.Date(as.character(ten_melted$Year), format = "%Y")
+ten_melted$Year <- year(ten_melted$Year)
+ten_melted <- with(ten_melted,  ten_melted[order(City) , ])
+ten_melted$Cost_of_Living_Index <- as.numeric(ten_melted$Cost_of_Living_Index )
+#ten_melted_d = dcast(ten_melted, Year ~ City, value.var = "Cost_of_Living_Index")
+#ten_melted_d = ten_melted[order(ten_melted$Year),]
+```
+
+```{r}
+ggplot(ten_melted,                            
+       aes(x = Year,
+           y = Cost_of_Living_Index,
+           col = City)) +
+  geom_line()
+```
+
+```{r}
+#scatterplot of  salary vs cost of living
+scat1 =  total[c("City", "Average_salary", "Cost of Living Index_2019")]
+colnames(scat1) <- c("City", "Average_salary", "Cost_of_Living_2019")
+rownames(scat1) <- scat1$City
+
+ggplot(scat1, aes(x=Cost_of_Living_2019, y=Average_salary)) +
+  geom_text(
+    label=rownames(scat1), 
+    nudge_x = 0.25, nudge_y = 0.25, 
+    check_overlap = T,
+  )+xlab("2019 Cost of Living Index")+ylab("Average Salary")
+```
+```{r}
+#bubbleplot of cost of living, concert venues and sports venues
+
+bubb1 =  total[c("City", "Concert_venues", "Sports_venues", "Cost of Living Index_2019")]
+colnames(bubb1) <- c("City", "Concert_venues", "Sports_venues","Cost_of_Living_2019")
+rownames(bubb1) <- bubb1$City
+bubb1$Cost_of_Living_2019 <- as.numeric(bubb1$Cost_of_Living_2019)
+bubb1$Concert_venues <- as.numeric(bubb1$Concert_venues)
+bubb1$Sports_venues <- as.numeric(bubb1$Sports_venues)
+bubb1%>%
+  ggplot(aes(x=Concert_venues, y=Sports_venues, size = Cost_of_Living_2019)) +
+    geom_point(alpha=0.2, colour="blue") +xlab("Number of Concert Venues")+ylab("Number of Sports Venues") + geom_text(
+    label=rownames(bubb1), check_overlap = T, size=3.1) +
+    scale_size(range = c(.1, 15), name="Cost of Living Index") 
+
+```
+
+
+```{r}
+#stacked bar chart of public libraries, community centers, museums
+stack1 =  total[c("City", "Museums", "Public_Libraries", "Comm_centers")]
+stack1 <- na.omit(stack1) 
+
+
+stack_melted<- melt(stack1, id.vars = "City", measure.vars= c("Museums", "Public_Libraries", "Comm_centers"))
+stack_melted$value <- as.numeric(stack_melted$value)
+ggplot(stack_melted, aes(x = City, y = value))+
+  geom_col(aes(fill = variable))+coord_flip()+scale_y_continuous(name="Number of Public Amenities", limits=c(0, 1600))+scale_fill_discrete(name = "Public Amenity", labels = c("National Museums", "Public Libraries", "Community Centers"))
+
+
+```
+```{r}
+#scatterplot pollution and congestion
+scat2 =  total[c("City", "Pollution Index", "Congestion_hours")]
+colnames(scat2) <- c("City", "Pollution_Index", "Congestion_Hours")
+rownames(scat2) <- scat2$City
+
+ggplot(scat2, aes(x=Congestion_Hours, y=Pollution_Index))+
+  geom_text(
+    label=rownames(scat2), 
+    nudge_x = 0.25, nudge_y = 0.25, 
+    check_overlap = T,
+  )+ylab("Pollution Index")+xlab("Hours Lost Driving in Rush Hour due to Congestion in 2019")
+```
+```{r}
+#grouped bar chart on tolerance
+set.seed(20)
+grouped =  total[c("City", "LGBT", "Minority")]
+rand_ten_2 = sample_n(grouped,10)
+rand_ten_2$Minority = rand_ten_2$Minority*100
+rand_ten_2$LGBT[rand_ten_2$LGBT == 556.0] = 56.0
+
+grouped_melted<- melt(rand_ten_2, id.vars = "City", measure.vars= c("LGBT", "Minority"))
+grouped_melted$value <- as.numeric(grouped_melted$value)
+
+ggplot(grouped_melted, aes(factor(City), value, fill = variable, width=0.5)) + 
+  geom_bar(stat="identity", position = "dodge") +  scale_x_discrete(guide = guide_axis(n.dodge = 2)) + scale_fill_brewer(palette = "Set1")+ylab("Equality/Tolerance Score")+xlab("City") + labs(fill = " ")
+
+
+```
+
+
+
+
+
+
+
